@@ -10,6 +10,12 @@
 #define ENC_PIN_1 2
 #define ENC_PIN_2 4
 
+// left joystick pins
+#define JOY_L_X A2
+#define JOY_L_Y A3
+#define JOY_R_X A0
+#define JOY_R_Y A1
+
 #define OLED_RESET -1 // This display does not have a reset pin accessible
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
@@ -30,6 +36,17 @@ XPos pos3 = {10};
 int enc_pos;
 int enc_last_pos;
 
+// joystick positions
+int joy_l_x;
+int joy_l_y;
+int joy_l_trim_x = 0;
+int joy_l_trim_y = 0;
+int joy_r_x;
+int joy_r_y;
+int joy_r_trim_x = 0;
+int joy_r_trim_y = 0;
+#define JOY_ALPHA 0.8 // 0.0 - 1.0, higher = more smoothing
+
 void readEncoderPos();
 
 void displayPositions(XYPos pos1, XYPos pos2, XPos pos3, bool inverted);
@@ -44,20 +61,56 @@ void setup()
   enc_last_pos = digitalRead(ENC_PIN_1);
   attachInterrupt(digitalPinToInterrupt(ENC_PIN_1), readEncoderPos, CHANGE);
 
-  delay(100);
+  // set up joysticks
+  pinMode(JOY_L_X, INPUT_PULLUP);
+  pinMode(JOY_L_Y, INPUT_PULLUP);
+  pinMode(JOY_R_X, INPUT_PULLUP);
+  pinMode(JOY_R_Y, INPUT_PULLUP);
+
+  joy_l_x = analogRead(JOY_L_X);
+  joy_l_y = analogRead(JOY_L_Y);
+  joy_r_x = analogRead(JOY_R_X);
+  joy_r_y = analogRead(JOY_R_Y);
+  joy_l_trim_x = joy_l_x - 512;
+  joy_l_trim_y = joy_l_y - 512;
+  joy_r_trim_x = joy_r_x - 512;
+  joy_r_trim_y = joy_r_y - 512;
+  joy_l_x = 512;
+  joy_l_y = 512;
+  joy_r_x = 512;
+  joy_r_y = 512;
+
   Serial.println("Starting...");
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3C for 128x64
     Serial.println("SSD1306 allocation failed");
     for (;;); // Don't proceed, loop forever
   }
+  Serial.println("SSD1306 allocation successful");
   display.clearDisplay();
   display.display();
   displayPositions(pos1, pos2, pos3, true);
 }
 
+void pollJoysticks() {
+  int new_l_x = analogRead(JOY_L_X) - joy_l_trim_x;
+  int new_l_y = 1023 - analogRead(JOY_L_Y) + joy_l_trim_y; // invert Y
+  joy_l_x = joy_l_x * JOY_ALPHA + new_l_x * (1.0 - JOY_ALPHA);
+  joy_l_y = joy_l_y * JOY_ALPHA + new_l_y * (1.0 - JOY_ALPHA);
+  joy_l_x = constrain(joy_l_x, 0, 1023);
+  joy_l_y = constrain(joy_l_y, 0, 1023);
+  pos1 = {joy_l_x, joy_l_y};
+  int new_r_x = analogRead(JOY_R_X) - joy_r_trim_x;
+  int new_r_y = 1023 - analogRead(JOY_R_Y) + joy_r_trim_y; // invert Y
+  joy_r_x = joy_r_x * JOY_ALPHA + new_r_x * (1.0 - JOY_ALPHA);
+  joy_r_y = joy_r_y * JOY_ALPHA + new_r_y * (1.0 - JOY_ALPHA);
+  joy_r_x = constrain(joy_r_x, 0, 1023);
+  joy_r_y = constrain(joy_r_y, 0, 1023);
+  pos2 = {joy_r_x, joy_r_y};
+}
+
 void loop() {
-  // put your main code here, to run repeatedly:
-  delay(100);
+  pollJoysticks();
+
   displayPositions(pos1, pos2, pos3, true);
 }
 
@@ -70,8 +123,10 @@ void loop() {
 #define CH_RS 2 * CH_HM + 2 * CH_L + 4 // right side of the crosshair space
 
 // scaling values
-#define CH_MAX_X 100 // set to the maximum positive x-value that the controller can report
-#define CH_MAX_Y 100 // set to the maximum positive y-value that the controller can report
+#define CH_MAX_X 1023 // set to the maximum positive x-value that the controller can report
+#define CH_MIN_X 0 // set to the maximum negative x-value that the controller can report
+#define CH_MAX_Y 1023 // set to the maximum positive y-value that the controller can report
+#define CH_MIN_Y 0 // set to the maximum negative y-value that the controller can report
 #define SCALAR_MAX 100 // set to the maximum scalar value that the controller can report
 
 
@@ -85,7 +140,11 @@ void drawCrosshairs() {
 }
 
 void drawBall(XYPos pos, uint8_t centerX) {
-  display.fillCircle(pos.x + centerX, pos.y + CH_CY, 5, WHITE);
+  uint8_t scaledY = map(pos.y, CH_MIN_Y, CH_MAX_Y, -CH_L / 2, CH_L / 2);
+  uint8_t scaledX = map(pos.x, CH_MIN_X, CH_MAX_X, -CH_L / 2, CH_L / 2);
+  uint8_t drawX = centerX + scaledX;
+  uint8_t drawY = CH_CY + scaledY;
+  display.fillCircle(drawX, drawY, 5, WHITE);
 }
 
 void drawRHBox() {
